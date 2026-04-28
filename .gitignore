@@ -57,3 +57,4 @@ logs/
 # ── Numpy / model artifacts ───────────────────────────────────────
 *.npy
 *.npz
+node_modules/

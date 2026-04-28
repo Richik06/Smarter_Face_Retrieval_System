@@ -14,7 +14,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -47,6 +47,10 @@ def patch_settings(tmp_event_dir):
         mock_settings.DBSCAN_METRIC = "cosine"
         mock_settings.SIMILARITY_THRESHOLD = 0.50
         mock_settings.USE_FAISS = False
+        mock_settings.CLOUDINARY_CLOUD_NAME = "demo-cloud"
+        mock_settings.CLOUDINARY_API_KEY = "1234567890"
+        mock_settings.CLOUDINARY_API_SECRET = "abcdefg"
+        mock_settings.CLOUDINARY_UPLOAD_FOLDER = "face-retrieval"
         mock_settings.LOG_LEVEL = "DEBUG"
         yield mock_settings
 
@@ -265,6 +269,14 @@ class TestStorage:
         from utils.storage import load_clusters
         assert load_clusters("nonexistent_event_xyz") is None
 
+    def test_save_load_asset_urls(self, tmp_event_dir):
+        from utils.storage import load_asset_urls, save_asset_urls
+
+        asset_urls = {"event_data/demo/images/a.jpg": "https://example.com/a.jpg"}
+        save_asset_urls("asset_url_test", asset_urls)
+        loaded = load_asset_urls("asset_url_test")
+        assert loaded == asset_urls
+
 
 
 # API integration tests
@@ -361,6 +373,106 @@ class TestSearchFaceEndpoint:
             files={"image": ("query.jpg", io.BytesIO(img_bytes), "image/jpeg")},
         )
         assert r.status_code == 404
+
+
+class TestAppIntegrationEndpoints:
+    def test_cloudinary_signature(self, client):
+        response = client.post(
+            "/app/cloudinary/signature",
+            json={"event_id": "launch-night", "asset_type": "events"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["cloud_name"] == "demo-cloud"
+        assert body["api_key"] == "1234567890"
+        assert body["folder"].endswith("/events/launch-night")
+        assert body["signature"]
+
+    def test_process_event_urls(self, client):
+        from services.remote_image_service import RemoteUploadBatch
+
+        fake_batch = RemoteUploadBatch(uploads=[], url_map={})
+        fake_result = {
+            "event_id": "remote_event",
+            "num_people_detected": 1,
+            "clusters": [],
+        }
+
+        with patch(
+            "api.routes.integration.RemoteImageService.fetch_event_uploads",
+            new=AsyncMock(return_value=fake_batch),
+        ), patch(
+            "api.routes.integration.EventService.process_event",
+            return_value=fake_result,
+        ):
+            response = client.post(
+                "/app/process-event-urls",
+                json={
+                    "event_id": "remote_event",
+                    "image_urls": ["https://example.com/photo-one.jpg"],
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["event_id"] == "remote_event"
+
+    def test_search_face_url(self, client):
+        from services.remote_image_service import RemoteAsset
+        from utils.storage import ensure_event_dirs, save_clusters
+
+        event_id = "remote_search_event"
+        ensure_event_dirs(event_id)
+        save_clusters(
+            event_id,
+            {
+                "event_id": event_id,
+                "num_clusters": 1,
+                "clusters": {
+                    "0": {
+                        "cluster_id": 0,
+                        "centroid": (np.ones(512) / np.sqrt(512)).tolist(),
+                        "num_faces": 1,
+                        "num_images": 1,
+                        "image_paths": ["https://example.com/match.jpg"],
+                    }
+                },
+            },
+        )
+
+        fake_asset = RemoteAsset(
+            filename="query.jpg",
+            content=_make_fake_image_bytes(),
+            content_type="image/jpeg",
+            source_url="https://example.com/query.jpg",
+        )
+
+        with patch(
+            "api.routes.integration.RemoteImageService.fetch_single_asset",
+            new=AsyncMock(return_value=fake_asset),
+        ), patch(
+            "api.routes.integration.EmbeddingService.get_single_embedding",
+            return_value=np.ones(512, dtype=np.float32) / np.sqrt(512),
+        ), patch(
+            "api.routes.integration.SearchService.search",
+            return_value={
+                "matched_cluster_id": 0,
+                "similarity": 0.92,
+                "matched_images": ["https://example.com/match.jpg"],
+                "message": "Match found.",
+            },
+        ):
+            response = client.post(
+                "/app/search-face-url",
+                json={
+                    "event_id": event_id,
+                    "image_url": "https://example.com/query.jpg",
+                },
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["matched_cluster_id"] == 0
+        assert body["matched_images"] == ["https://example.com/match.jpg"]
 
 
 

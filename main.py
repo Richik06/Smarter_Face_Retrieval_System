@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import embedding, events, search
+from api.routes import embedding, events, integration, search
 from utils.logger import setup_logger
 
 #Logging
@@ -71,6 +71,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(events.router, tags=["Events"])
 app.include_router(embedding.router, tags=["Embedding"])
 app.include_router(search.router, tags=["Search"])
+app.include_router(integration.router, tags=["App"])
 
 
 # ── Health check
