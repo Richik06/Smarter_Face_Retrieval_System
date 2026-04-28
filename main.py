@@ -78,6 +78,14 @@ app.include_router(search.router, tags=["Search"])
 async def health_check():
     return {"status": "ok", "service": "face-retrieval-microservice"}
 
+@app.get("/")
+async def root():
+    return {
+        "service": "Face Retrieval Microservice",
+        "status": "running",
+        "docs": "http://127.0.0.1:8000/docs"
+    }
+
 
 # ── CLI entry point
 if __name__ == "__main__":
