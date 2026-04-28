@@ -23,3 +23,6 @@ scikit-learn>=1.4.0           # DBSCAN
 Pillow>=10.3.0                # used internally by DeepFace
 requests>=2.31.0              # used by DeepFace for model downloads
 tqdm>=4.66.0
+
+#Testing
+pytest>=9.0.3
