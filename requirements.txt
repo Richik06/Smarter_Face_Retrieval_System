@@ -1,0 +1,25 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9       # required for UploadFile / Form
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# ── AI / ML ───────────────────────────────────────────────────────────────────
+deepface>=0.0.93              # face detection + embedding (Facenet512, ArcFace)
+tf-keras>=2.16.0              # DeepFace TF2 backend
+numpy>=1.26.0
+opencv-python-headless>=4.9.0 # headless – no GUI dependency
+scikit-learn>=1.4.0           # DBSCAN
+
+# ── Optional: fast similarity search ─────────────────────────────────────────
+# Uncomment the line that matches your hardware:
+# faiss-cpu>=1.8.0            # CPU-only
+# faiss-gpu>=1.7.4            # GPU (requires CUDA)
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+Pillow>=10.3.0                # used internally by DeepFace
+requests>=2.31.0              # used by DeepFace for model downloads
+tqdm>=4.66.0
