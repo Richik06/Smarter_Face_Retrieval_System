@@ -1,0 +1,59 @@
+# ── Virtual environment ───────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Python cache ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# ── Event data (runtime generated) ───────────────────────────────
+event_data/
+
+# ── DeepFace model weights ────────────────────────────────────────
+.deepface/
+
+# ── Environment variables ─────────────────────────────────────────
+.env
+# keep the example file tracked:
+!.env.example
+
+# ── VS Code ───────────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+
+# ── Pytest / coverage ─────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── Distribution / packaging ──────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.egg
+
+# ── Jupyter ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── OS files ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── FAISS index (regenerated automatically) ───────────────────────
+*.index
+
+# ── Numpy / model artifacts ───────────────────────────────────────
+*.npy
+*.npz
