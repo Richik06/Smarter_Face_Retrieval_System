@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  face-retrieval:
+    build: .
+    container_name: face_retrieval_service
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist event data outside the container
+      - ./event_data:/app/event_data
+      # Persist downloaded model weights
+      - deepface_models:/root/.deepface
+    environment:
+      - DETECTOR_BACKEND=retinaface
+      - EMBEDDING_MODEL=Facenet512
+      - DBSCAN_EPS=0.35
+      - DBSCAN_MIN_SAMPLES=1
+      - SIMILARITY_THRESHOLD=0.55
+      - USE_FAISS=true
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+volumes:
+  deepface_models:
