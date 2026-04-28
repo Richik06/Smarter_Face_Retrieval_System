@@ -1,41 +1,33 @@
 """
 Centralised configuration loaded from environment variables.
-All tuneable parameters live here – no magic numbers scattered around the code.
+All tuneable parameters live here - no magic numbers scattered around the code.
 """
 
 from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # ── Storage 
     EVENT_DATA_DIR: Path = Path("event_data")
 
-    # ── Face detection
-    # Backend used by DeepFace for detection
-    DETECTOR_BACKEND: str = "retinaface"   # options: retinaface, mtcnn, opencv
+    DETECTOR_BACKEND: str = "retinaface"
 
-    # ── Face embedding 
-    # Primary model; switch to "ArcFace" for the optional alternative
     EMBEDDING_MODEL: str = "Facenet512"
-    EMBEDDING_DIM: int = 512               # Facenet512 → 512-d; ArcFace → 512-d
+    EMBEDDING_DIM: int = 512
 
-    # ── DBSCAN clustering
-    # Cosine distance threshold between faces of the *same* person.
-    # Lower  = stricter (more clusters / fewer false-merges).
-    # Higher = looser   (fewer clusters / possible false-merges).
     DBSCAN_EPS: float = 0.35
-    DBSCAN_MIN_SAMPLES: int = 1   # 1 → every point can be a core point (no noise)
+    DBSCAN_MIN_SAMPLES: int = 1
     DBSCAN_METRIC: str = "cosine"
 
-    # ── Similarity search 
-    # Minimum cosine similarity required to accept a cluster match (0–1).
     SIMILARITY_THRESHOLD: float = 0.55
+    USE_FAISS: bool = True
 
-    # ── FAISS 
-    USE_FAISS: bool = True                 # set False to fall back to NumPy
+    CLOUDINARY_CLOUD_NAME: str = "demo-cloud"
+    CLOUDINARY_API_KEY: str = "1234567890"
+    CLOUDINARY_API_SECRET: str = "abcdefg"
+    CLOUDINARY_UPLOAD_FOLDER: str = "face-retrieval"
 
-    # ── Misc 
     LOG_LEVEL: str = "INFO"
 
     class Config:
@@ -44,6 +36,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-# Ensure the root storage directory exists at import time
 settings.EVENT_DATA_DIR.mkdir(parents=True, exist_ok=True)

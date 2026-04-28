@@ -18,6 +18,10 @@ services:
       - DBSCAN_MIN_SAMPLES=1
       - SIMILARITY_THRESHOLD=0.55
       - USE_FAISS=true
+      - CLOUDINARY_CLOUD_NAME=demo-cloud
+      - CLOUDINARY_API_KEY=1234567890
+      - CLOUDINARY_API_SECRET=abcdefg
+      - CLOUDINARY_UPLOAD_FOLDER=face-retrieval
       - LOG_LEVEL=INFO
     restart: unless-stopped
 
