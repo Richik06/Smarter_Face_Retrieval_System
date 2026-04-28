@@ -1,0 +1,19 @@
+$kind: http-request
+name: http://127.0.0.1:8000/search-face
+url: http://127.0.0.1:8000/search-face
+method: POST
+body:
+  type: formdata
+  content:
+    - type: text
+      key: event_id
+      value: wedding2024
+      description: ""
+      disabled: false
+    - type: file
+      key: image
+      src:
+        - postman-cloud:///1f142d37-19fd-4970-8d44-73b82a579fa7
+      description: ""
+      disabled: false
+order: 1777361236525
