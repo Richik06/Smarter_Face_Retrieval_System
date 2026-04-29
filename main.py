@@ -12,14 +12,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import embedding, events, integration, search
+from api.routes import embedding, events, search, drive
 from utils.logger import setup_logger
 
-#Logging
+# ── Logging ──────────────────────────────────────────────────────────────────
 logger = setup_logger(__name__)
 
 
-#  Lifespan 
+# ── Lifespan ─────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle handler."""
@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Face Retrieval Microservice.")
 
 
-#Application 
+# ── Application ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Face Retrieval Microservice",
     description=(
@@ -57,7 +57,7 @@ app.add_middleware(
 )
 
 
-#Global exception handler
+# ── Global exception handler ──────────────────────────────────────────────────
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error("Unhandled exception on %s: %s", request.url, exc, exc_info=True)
@@ -67,28 +67,25 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-#Routers
+# ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(events.router, tags=["Events"])
 app.include_router(embedding.router, tags=["Embedding"])
 app.include_router(search.router, tags=["Search"])
-app.include_router(integration.router, tags=["App"])
+app.include_router(drive.router, tags=["Google Drive"])
 
 
-# ── Health check
+# ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/health", tags=["Health"])
 async def health_check():
-    return {"status": "ok", "service": "face-retrieval-microservice"}
-
-@app.get("/")
-async def root():
+    from utils.faiss_engine import get_faiss_info
     return {
-        "service": "Face Retrieval Microservice",
-        "status": "running",
-        "docs": "http://127.0.0.1:8000/docs"
+        "status": "ok",
+        "service": "face-retrieval-microservice",
+        "faiss": get_faiss_info(),
     }
 
 
-# ── CLI entry point
+# ── CLI entry point ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",

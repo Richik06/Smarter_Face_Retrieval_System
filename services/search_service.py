@@ -1,20 +1,23 @@
 """
 SearchService
 ─────────────
-Given a query embedding, finds the best-matching cluster in a stored event.
+Two-stage face retrieval:
 
-Two backends are supported:
-  1. FAISS (fast approximate nearest-neighbour, default when USE_FAISS=True)
-  2. NumPy brute-force cosine similarity (exact, always available)
+  Stage 1 — FAISS (GPU or CPU):
+    Searches cluster CENTROIDS for top-K candidates.
+    Uses faiss_engine which auto-selects GPU/CPU based on config.
 
-Strategy
-────────
-• We compare the query against every cluster's *centroid*.
-• If the best cosine similarity is below SIMILARITY_THRESHOLD, we return no
-  match (the person is likely not present in the event).
-• As a tie-breaking refinement we can also compute similarity against all
-  individual member embeddings within the top-k candidates and pick the
-  cluster whose *maximum member similarity* is highest.
+  Stage 2 — Exact NumPy refinement:
+    For each top-K candidate, computes cosine similarity against every
+    individual member embedding stored in embeddings.npy.
+    Returns the cluster whose BEST MEMBER embedding is closest to the query.
+    This is more accurate than centroid-only matching.
+
+Why two stages?
+───────────────
+A cluster centroid can drift when a person appears in many group photos at
+different angles. Stage 2 catches cases where the centroid moved away from
+the query even though at least one member embedding is a great match.
 """
 
 from __future__ import annotations
@@ -24,48 +27,31 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from config import settings
+from utils.faiss_engine import (
+    faiss_available,
+    build_index,
+    save_index,
+    load_index,
+    search_index,
+    get_faiss_info,
+)
 from utils.logger import setup_logger
-from utils.storage import load_embeddings, load_clusters, faiss_index_path
+from utils.storage import (
+    load_embeddings,
+    load_clusters,
+    load_meta,
+    faiss_index_path,
+)
 
 logger = setup_logger(__name__)
 
+# Number of centroid candidates fetched in Stage 1
+_TOP_K = 5
 
-# ── FAISS helper
-
-def _build_faiss_index(vectors: np.ndarray):
-    """Build an inner-product (= cosine when normalised) FAISS index."""
-    try:
-        import faiss  # optional dependency
-        dim = vectors.shape[1]
-        index = faiss.IndexFlatIP(dim)   # Inner Product
-        index.add(vectors.astype(np.float32))
-        return index
-    except ImportError:
-        logger.warning("FAISS not installed; falling back to NumPy similarity search.")
-        return None
-
-
-def _save_faiss_index(index, path) -> None:
-    try:
-        import faiss
-        faiss.write_index(index, str(path))
-    except Exception as exc:
-        logger.warning("Could not save FAISS index: %s", exc)
-
-
-def _load_faiss_index(path):
-    try:
-        import faiss
-        if path.exists():
-            return faiss.read_index(str(path))
-    except Exception as exc:
-        logger.warning("Could not load FAISS index: %s", exc)
-    return None
-
-
-# ── Main service 
 
 class SearchService:
+
+    # ── Public search ─────────────────────────────────────────────────────────
 
     @classmethod
     def search(
@@ -74,15 +60,17 @@ class SearchService:
         event_id: str,
     ) -> Dict[str, Any]:
         """
-        Find the best-matching cluster for *query_embedding* in *event_id*.
+        Full two-stage search.
 
         Returns
         -------
-        dict with keys:
-          matched_cluster_id : int | None
-          similarity          : float
-          matched_images      : List[str]
-          message             : str
+        {
+          matched_cluster_id : int | None,
+          similarity         : float,
+          matched_images     : List[str],
+          search_device      : str,   ← "gpu" | "cpu" | "numpy"
+          message            : str,
+        }
         """
         clusters = load_clusters(event_id)
         if clusters is None or not clusters.get("clusters"):
@@ -92,70 +80,75 @@ class SearchService:
         if not cluster_map:
             return cls._no_match("Event has no clusters yet.")
 
-        # Build centroid matrix  (C, dim)
         cluster_ids = list(cluster_map.keys())
         centroids = np.array(
             [cluster_map[cid]["centroid"] for cid in cluster_ids],
             dtype=np.float32,
         )
 
-        # ── Similarity search ────────────────────────────────────────────────
-        best_idx, best_score = cls._find_best_match(
-            query_embedding, centroids, event_id
+        # ── Stage 1: fast centroid search ────────────────────────────────────
+        k = min(_TOP_K, len(cluster_ids))
+        top_indices, top_scores, search_device = cls._stage1_search(
+            query_embedding, centroids, event_id, k=k
+        )
+
+        if not top_indices:
+            return cls._no_match("Search returned no candidates.")
+
+        # Early exit if best centroid score is far below threshold
+        if top_scores[0] < settings.SIMILARITY_THRESHOLD * 0.5:
+            return cls._no_match(
+                f"No match found (best centroid similarity "
+                f"{top_scores[0]:.4f} well below threshold)."
+            )
+
+        # ── Stage 2: exact member-level refinement ────────────────────────────
+        best_cluster_id, best_score = cls._stage2_refine(
+            query_embedding, top_indices, cluster_ids, cluster_map, event_id
         )
 
         if best_score < settings.SIMILARITY_THRESHOLD:
-            logger.info(
-                "Best similarity %.4f below threshold %.4f – no match.",
-                best_score,
-                settings.SIMILARITY_THRESHOLD,
-            )
             return cls._no_match(
-                f"No match found (best similarity {best_score:.4f} < "
-                f"threshold {settings.SIMILARITY_THRESHOLD})."
+                f"No match found (best member similarity {best_score:.4f} "
+                f"< threshold {settings.SIMILARITY_THRESHOLD})."
             )
 
-        matched_cid = cluster_ids[best_idx]
-        matched_cluster = cluster_map[matched_cid]
-
+        matched = cluster_map[best_cluster_id]
         logger.info(
-            "Matched cluster %s (similarity=%.4f) in event '%s'.",
-            matched_cid,
-            best_score,
-            event_id,
+            "Matched cluster %s (similarity=%.4f, device=%s) in event '%s'.",
+            best_cluster_id, best_score, search_device, event_id,
         )
         return {
-            "matched_cluster_id": int(matched_cluster["cluster_id"]),
+            "matched_cluster_id": int(matched["cluster_id"]),
             "similarity": round(float(best_score), 6),
-            "matched_images": matched_cluster["image_paths"],
+            "matched_images": matched["image_paths"],
+            "search_device": search_device,
             "message": "Match found.",
         }
 
-    # ── Similarity backends
+    # ── Stage 1 ───────────────────────────────────────────────────────────────
+
     @classmethod
-    def _find_best_match(
+    def _stage1_search(
         cls,
         query: np.ndarray,
         centroids: np.ndarray,
         event_id: str,
-    ) -> Tuple[int, float]:
-        """Return (index_into_centroids, cosine_similarity)."""
+        k: int = 5,
+    ) -> Tuple[List[int], List[float], str]:
+        """
+        Returns (top_indices, top_scores, device_used).
+        device_used is "gpu", "cpu", or "numpy".
+        """
+        if settings.USE_FAISS and faiss_available():
+            indices, scores = cls._faiss_search(query, centroids, event_id, k=k)
+            if indices:
+                from utils.faiss_engine import get_device
+                return indices, scores, get_device()
 
-        if settings.USE_FAISS:
-            result = cls._faiss_search(query, centroids, event_id)
-            if result is not None:
-                return result
-
-        return cls._numpy_search(query, centroids)
-
-    @classmethod
-    def _numpy_search(
-        cls, query: np.ndarray, centroids: np.ndarray
-    ) -> Tuple[int, float]:
-        """Exact cosine similarity (dot product, since vectors are L2-normalised)."""
-        scores = centroids @ query                          # (C,)
-        best_idx = int(np.argmax(scores))
-        return best_idx, float(scores[best_idx])
+        # NumPy fallback
+        indices, scores = cls._numpy_topk(query, centroids, k=k)
+        return indices, scores, "numpy"
 
     @classmethod
     def _faiss_search(
@@ -163,58 +156,129 @@ class SearchService:
         query: np.ndarray,
         centroids: np.ndarray,
         event_id: str,
-    ) -> Optional[Tuple[int, float]]:
-        """
-        Attempt a FAISS-accelerated search.
-        Rebuilds or loads the index as needed.
-        Returns None if FAISS is unavailable.
-        """
-        try:
-            import faiss  # noqa: F401
-        except ImportError:
-            return None
-
+        k: int = 5,
+    ) -> Tuple[List[int], List[float]]:
+        """Load or rebuild the FAISS index and search."""
         idx_path = faiss_index_path(event_id)
-        index = _load_faiss_index(idx_path)
+        index = load_index(idx_path)
 
+        # Rebuild if missing or stale (different number of clusters)
         if index is None or index.ntotal != len(centroids):
             logger.debug("Rebuilding FAISS index for event '%s'.", event_id)
-            index = _build_faiss_index(centroids)
+            index = build_index(centroids)
             if index is None:
-                return None
-            _save_faiss_index(index, idx_path)
+                return [], []
+            save_index(index, idx_path)
 
-        q = query.reshape(1, -1).astype(np.float32)
-        scores, indices = index.search(q, 1)
-        best_idx = int(indices[0][0])
-        best_score = float(scores[0][0])
-        return best_idx, best_score
+        return search_index(index, query, k=k)
 
-    # ── Helpers 
+    @staticmethod
+    def _numpy_topk(
+        query: np.ndarray,
+        centroids: np.ndarray,
+        k: int = 5,
+    ) -> Tuple[List[int], List[float]]:
+        """Pure NumPy exact top-k (fallback when FAISS unavailable)."""
+        scores = centroids @ query
+        k = min(k, len(scores))
+        top_idx = np.argsort(scores)[::-1][:k]
+        return list(top_idx.tolist()), list(scores[top_idx].tolist())
+
+    # ── Stage 2 ───────────────────────────────────────────────────────────────
+
+    @classmethod
+    def _stage2_refine(
+        cls,
+        query: np.ndarray,
+        candidate_indices: List[int],
+        cluster_ids: List[str],
+        cluster_map: Dict[str, Any],
+        event_id: str,
+    ) -> Tuple[str, float]:
+        """
+        For each candidate cluster compare query against every member embedding.
+        Returns (best_cluster_id_str, best_cosine_similarity).
+        Falls back to centroid similarity when embeddings.npy is unavailable.
+        """
+        all_embeddings = load_embeddings(event_id)
+        all_meta = load_meta(event_id)
+
+        best_cid = cluster_ids[candidate_indices[0]]
+        best_score = -1.0
+
+        for idx in candidate_indices:
+            cid = cluster_ids[idx]
+            cluster = cluster_map[cid]
+            cluster_id_int = cluster["cluster_id"]
+
+            if all_embeddings is not None and all_meta is not None:
+                # Gather row indices belonging to this cluster
+                member_rows = [
+                    i for i, m in enumerate(all_meta)
+                    if m.get("cluster_id") == cluster_id_int
+                ]
+                if member_rows:
+                    member_embs = all_embeddings[member_rows]     # (k, dim)
+                    score = float(np.max(member_embs @ query))    # best member sim
+                else:
+                    centroid = np.array(cluster["centroid"], dtype=np.float32)
+                    score = float(np.dot(centroid, query))
+            else:
+                # No embeddings on disk — use centroid only
+                centroid = np.array(cluster["centroid"], dtype=np.float32)
+                score = float(np.dot(centroid, query))
+
+            if score > best_score:
+                best_score = score
+                best_cid = cid
+
+        return best_cid, best_score
+
+    # ── Index management ──────────────────────────────────────────────────────
+
+    @classmethod
+    def build_and_save_faiss_index(
+        cls, event_id: str, centroids: np.ndarray
+    ) -> None:
+        """
+        Pre-build and persist FAISS index after event processing.
+        Called automatically by EventService.
+        """
+        if not settings.USE_FAISS or not faiss_available():
+            logger.info(
+                "FAISS skipped for '%s' (USE_FAISS=%s, available=%s).",
+                event_id, settings.USE_FAISS, faiss_available(),
+            )
+            return
+
+        if len(centroids) == 0:
+            logger.warning("No centroids to index for event '%s'.", event_id)
+            return
+
+        index = build_index(centroids)
+        if index is not None:
+            saved = save_index(index, faiss_index_path(event_id))
+            if saved:
+                logger.info(
+                    "FAISS index saved for event '%s' (%d centroids).",
+                    event_id, len(centroids),
+                )
+
+    # ── Diagnostics ──────────────────────────────────────────────────────────
+
+    @classmethod
+    def faiss_info(cls) -> dict:
+        """Return FAISS device/version info for health/debug endpoints."""
+        return get_faiss_info()
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
     @staticmethod
     def _no_match(message: str) -> Dict[str, Any]:
         return {
             "matched_cluster_id": None,
             "similarity": 0.0,
             "matched_images": [],
+            "search_device": "none",
             "message": message,
         }
-
-    # ── FAISS index management 
-
-    @classmethod
-    def build_and_save_faiss_index(
-        cls, event_id: str, centroids: np.ndarray
-    ) -> None:
-        """Pre-build the FAISS index after processing an event."""
-        if not settings.USE_FAISS:
-            return
-        try:
-            import faiss  # noqa: F401
-        except ImportError:
-            return
-
-        index = _build_faiss_index(centroids)
-        if index is not None:
-            _save_faiss_index(index, faiss_index_path(event_id))
-            logger.info("FAISS index built for event '%s' (%d vectors).", event_id, len(centroids))
