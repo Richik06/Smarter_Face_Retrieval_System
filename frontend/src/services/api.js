@@ -49,6 +49,23 @@ export function processEventUrls({ eventId, imageUrls }) {
   });
 }
 
+export async function processEventFromDrive({ eventId, driveLink }) {
+  const formData = new FormData();
+  formData.append("event_id", eventId);
+  formData.append("drive_link", driveLink);
+
+  const response = await fetch(`${API_BASE}/process-event-from-drive`, {
+    method: "POST",
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+
+  return response.json();
+}
+
 export function searchFaceUrl({ eventId, imageUrl }) {
   return request("/app/search-face-url", {
     method: "POST",

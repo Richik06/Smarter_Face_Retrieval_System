@@ -251,6 +251,48 @@ input {
   box-shadow: 0 0 0 0.3rem rgba(15, 118, 110, 0.12);
 }
 
+.source-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-top: 1rem;
+  padding: 0.35rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.source-toggle__button {
+  min-height: 2.65rem;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 5px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.source-toggle__button--active {
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(20, 20, 20, 0.06);
+}
+
+.source-toggle__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
+}
+
+.drive-import {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px dashed rgba(15, 118, 110, 0.22);
+  background: rgba(255, 255, 255, 0.68);
+}
+
 .dropzone {
   margin-top: 1rem;
   padding: 1.4rem;

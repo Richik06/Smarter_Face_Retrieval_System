@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import embedding, events, search, drive
+from api.routes import embedding, events, search, drive, integration
 from utils.logger import setup_logger
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -72,6 +72,7 @@ app.include_router(events.router, tags=["Events"])
 app.include_router(embedding.router, tags=["Embedding"])
 app.include_router(search.router, tags=["Search"])
 app.include_router(drive.router, tags=["Google Drive"])
+app.include_router(integration.router, tags=["Web App"])
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

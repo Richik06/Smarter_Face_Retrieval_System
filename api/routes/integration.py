@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import io
 import zipfile
+from pathlib import Path
+from urllib.parse import quote, unquote, urlparse
 from typing import List, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
 
 from api.routes.events import ProcessEventResponse
@@ -29,6 +31,7 @@ from utils.logger import setup_logger
 from utils.storage import (
     clusters_exist,
     event_exists,
+    images_dir,
     load_asset_urls,
     load_clusters,
     save_asset_urls,
@@ -68,7 +71,7 @@ class SearchFaceUrlRequest(BaseModel):
 
 class DownloadAllRequest(BaseModel):
     event_id: str = Field(..., min_length=1)
-    image_urls: List[HttpUrl] = Field(..., min_length=1)
+    image_urls: List[str] = Field(..., min_length=1)
 
 
 @router.post(
@@ -181,7 +184,25 @@ async def search_face_url(payload: SearchFaceUrlRequest):
         result["matched_images"],
         asset_urls,
     )
+    result["matched_images"] = _rewrite_local_image_list(
+        payload.event_id,
+        result["matched_images"],
+    )
     return SearchResponse(**result)
+
+
+@router.get(
+    "/event-assets/{event_id}/{image_path:path}",
+    summary="Serve a processed event image for the web client",
+)
+async def get_event_asset(event_id: str, image_path: str):
+    root = images_dir(event_id).resolve()
+    target = (root / unquote(image_path)).resolve()
+
+    if not _is_relative_to(target, root) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Image not found.")
+
+    return FileResponse(target)
 
 
 @router.post(
@@ -196,7 +217,7 @@ async def download_all(payload: DownloadAllRequest):
     )
 
     try:
-        assets = await RemoteImageService.fetch_assets(payload.image_urls)
+        assets = await _load_download_assets(payload.event_id, payload.image_urls)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except httpx.HTTPError as exc:
@@ -218,3 +239,66 @@ def _build_zip_archive(event_id: str, assets: List[RemoteAsset]) -> io.BytesIO:
             archive.writestr(f"{event_id}-match-{index:02d}.{suffix}", asset.content)
     buffer.seek(0)
     return buffer
+
+
+async def _load_download_assets(event_id: str, image_urls: List[str]) -> List[RemoteAsset]:
+    local_assets: List[RemoteAsset] = []
+    remote_urls: List[str] = []
+
+    for image_url in image_urls:
+        local_path = _local_asset_path(event_id, image_url)
+        if local_path:
+            local_assets.append(
+                RemoteAsset(
+                    filename=local_path.name,
+                    content=local_path.read_bytes(),
+                    content_type="image/jpeg",
+                    source_url=image_url,
+                )
+            )
+        else:
+            remote_urls.append(image_url)
+
+    remote_assets = await RemoteImageService.fetch_assets(remote_urls) if remote_urls else []
+    return [*local_assets, *remote_assets]
+
+
+def _rewrite_local_image_list(event_id: str, image_paths: List[str]) -> List[str]:
+    return [_local_image_url(event_id, image_path) or image_path for image_path in image_paths]
+
+
+def _local_image_url(event_id: str, image_path: str) -> str | None:
+    try:
+        root = images_dir(event_id).resolve()
+        target = Path(image_path).resolve()
+    except OSError:
+        return None
+
+    if not target.is_file() or not _is_relative_to(target, root):
+        return None
+
+    rel_path = target.relative_to(root).as_posix()
+    return f"/app/event-assets/{event_id}/{quote(rel_path)}"
+
+
+def _local_asset_path(event_id: str, image_url: str) -> Path | None:
+    parsed = urlparse(image_url)
+    path = parsed.path if parsed.scheme else image_url
+    prefix = f"/app/event-assets/{event_id}/"
+
+    if not path.startswith(prefix):
+        return None
+
+    root = images_dir(event_id).resolve()
+    target = (root / unquote(path.removeprefix(prefix))).resolve()
+    if not target.is_file() or not _is_relative_to(target, root):
+        return None
+    return target
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False

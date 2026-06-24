@@ -35,7 +35,12 @@ export default function QueryPage() {
     };
   }, [item]);
 
-  if (!session.eventId || !session.uploadUrls?.length) {
+  const indexedImageCount =
+    session.source === "google_drive"
+      ? session.processSummary?.images_downloaded ?? 0
+      : session.uploadUrls?.length ?? 0;
+
+  if (!session.eventId || !session.processSummary) {
     return (
       <EmptyState
         title="No indexed event yet"
@@ -166,7 +171,7 @@ export default function QueryPage() {
             <strong>{session.eventName || session.eventId}</strong>
             <br />
             {session.processSummary?.num_people_detected ?? 0} people clustered from{" "}
-            {session.uploadUrls.length} uploaded images.
+            {indexedImageCount} indexed images.
           </p>
         </section>
       </div>

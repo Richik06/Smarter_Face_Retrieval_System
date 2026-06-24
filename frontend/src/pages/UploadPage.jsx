@@ -6,7 +6,7 @@ import ProgressList from "../components/ProgressList";
 import StatusBanner from "../components/StatusBanner";
 import UploadDropzone from "../components/UploadDropzone";
 import { useSessionState } from "../hooks/useSessionState";
-import { getCloudinarySignature, processEventUrls } from "../services/api";
+import { getCloudinarySignature, processEventFromDrive, processEventUrls } from "../services/api";
 import { uploadImageToCloudinary } from "../services/cloudinary";
 import { buildFileId, slugifyEventId } from "../utils/files";
 
@@ -29,6 +29,8 @@ export default function UploadPage() {
   const [stage, setStage] = useState("idle");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [uploadSource, setUploadSource] = useState("files");
+  const [driveLink, setDriveLink] = useState("");
 
   useEffect(() => {
     itemsRef.current = items;
@@ -61,6 +63,8 @@ export default function UploadPage() {
             ? "Uploading..."
             : "Queued"
   }));
+
+  const isBusy = stage === "uploading" || stage === "processing" || stage === "importing";
 
   function updateEventName(value) {
     const previousSuggested = slugifyEventId(eventName || "");
@@ -152,6 +156,7 @@ export default function UploadPage() {
       setSession({
         eventName,
         eventId: normalizedEventId,
+        source: "cloudinary",
         uploadUrls: uploadedUrls,
         processSummary,
         queryUrl: "",
@@ -174,6 +179,44 @@ export default function UploadPage() {
     }
   }
 
+  async function handleDriveImport() {
+    const normalizedEventId = slugifyEventId(eventId || eventName);
+    const normalizedDriveLink = driveLink.trim();
+    if (!normalizedEventId || !normalizedDriveLink) {
+      return;
+    }
+
+    setError("");
+    setInfo("");
+    setStage("importing");
+
+    try {
+      const processSummary = await processEventFromDrive({
+        eventId: normalizedEventId,
+        driveLink: normalizedDriveLink
+      });
+
+      setSession({
+        eventName,
+        eventId: normalizedEventId,
+        source: "google_drive",
+        uploadUrls: [],
+        processSummary,
+        queryUrl: "",
+        searchResult: null
+      });
+      setInfo("Drive folder imported and indexed successfully.");
+      setStage("done");
+
+      startTransition(() => {
+        navigate("/query");
+      });
+    } catch (driveError) {
+      setStage("error");
+      setError(driveError.message || "Something went wrong while importing from Drive.");
+    }
+  }
+
   return (
     <div className="page-grid fade-in">
       <section className="page-card page-card--hero">
@@ -182,7 +225,9 @@ export default function UploadPage() {
             <p className="eyebrow">Step 1</p>
             <h2>Upload an event batch</h2>
           </div>
-          <span className="metric-chip">{items.length} selected</span>
+          <span className="metric-chip">
+            {uploadSource === "files" ? `${items.length} selected` : "Drive import"}
+          </span>
         </div>
 
         <div className="field-grid">
@@ -207,13 +252,52 @@ export default function UploadPage() {
           </label>
         </div>
 
-        <UploadDropzone
-          multiple
-          disabled={stage === "uploading" || stage === "processing"}
-          title="Drop event photos here"
-          description="Upload group shots, event albums, or any image set you want indexed."
-          onFilesSelected={addFiles}
-        />
+        <div className="source-toggle" role="tablist" aria-label="Upload source">
+          <button
+            type="button"
+            className={`source-toggle__button ${uploadSource === "files" ? "source-toggle__button--active" : ""}`}
+            onClick={() => setUploadSource("files")}
+            disabled={isBusy}
+          >
+            Local files
+          </button>
+          <button
+            type="button"
+            className={`source-toggle__button ${uploadSource === "drive" ? "source-toggle__button--active" : ""}`}
+            onClick={() => setUploadSource("drive")}
+            disabled={isBusy}
+          >
+            Google Drive
+          </button>
+        </div>
+
+        {uploadSource === "files" ? (
+          <UploadDropzone
+            multiple
+            disabled={isBusy}
+            title="Drop event photos here"
+            description="Upload group shots, event albums, or any image set you want indexed."
+            onFilesSelected={addFiles}
+          />
+        ) : (
+          <div className="drive-import">
+            <label className="field">
+              <span className="field__label">Google Drive folder link</span>
+              <input
+                className="input"
+                type="url"
+                placeholder="https://drive.google.com/drive/folders/..."
+                value={driveLink}
+                onChange={(event) => setDriveLink(event.target.value)}
+                disabled={isBusy}
+              />
+            </label>
+            <p className="muted-text">
+              Use a public folder shared with anyone who has the link. The backend will download
+              supported images and index the event automatically.
+            </p>
+          </div>
+        )}
 
         <StatusBanner
           tone="error"
@@ -231,23 +315,38 @@ export default function UploadPage() {
             <p className="muted-text">
               {stage === "uploading"
                 ? `Uploading to Cloudinary... ${overallProgress}%`
+                : stage === "importing"
+                  ? "Importing images from Google Drive..."
                 : stage === "processing"
                   ? "Processing embeddings and clusters..."
-                  : "Your images will upload first, then the backend will index them."}
+                  : uploadSource === "drive"
+                    ? "Drive imports skip browser upload and go straight to backend indexing."
+                    : "Your images will upload first, then the backend will index them."}
             </p>
           </div>
-          <button
-            type="button"
-            className="button button--primary"
-            disabled={!items.length || !eventId || stage === "uploading" || stage === "processing"}
-            onClick={handleUploadAndProcess}
-          >
-            {stage === "uploading"
-              ? "Uploading..."
-              : stage === "processing"
-                ? "Processing..."
-                : "Upload & Index Event"}
-          </button>
+          {uploadSource === "files" ? (
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={!items.length || !eventId || isBusy}
+              onClick={handleUploadAndProcess}
+            >
+              {stage === "uploading"
+                ? "Uploading..."
+                : stage === "processing"
+                  ? "Processing..."
+                  : "Upload & Index Event"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={!driveLink.trim() || !eventId || isBusy}
+              onClick={handleDriveImport}
+            >
+              {stage === "importing" ? "Importing..." : "Import from Drive"}
+            </button>
+          )}
         </div>
       </section>
 
