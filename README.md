@@ -45,108 +45,167 @@ User uploads one selfie → AI finds their cluster → returns all their photos
 
 ## 🏗️ Full System Architecture
 
----
+```mermaid
+flowchart TD
+    User(["👤 Admin / User"])
 
-### 🖥️ Layer 1 — Frontend (React + Vite · localhost:5173)
+    subgraph FE["Frontend — React + Vite (localhost:5173)"]
+        direction TB
+        FE1["📁 Upload Photos
+Direct files or Google Drive link"]
+        FE2["🔍 Search by Face
+Upload one selfie"]
+        FE3["🖼️ Results Gallery
+View matched photos"]
+    end
 
-| 📁 Upload Photos | 🔍 Search by Face | 🖼️ Results Gallery |
-|:---:|:---:|:---:|
-| Direct upload or Google Drive link | User uploads one selfie | Displays all matched photos |
-| Images stored via Cloudinary | AI finds every photo they appear in | Served via Cloudinary URLs |
+    subgraph PROXY["⚡ Vite Proxy — vite.config.js"]
+        P["Forwards all API calls to localhost:8000
+/process-event · /process-event-from-drive
+/search-face · /app/* · /images/*"]
+    end
 
-> **Vite Proxy** (`vite.config.js`) forwards all API calls to port 8000:
-> `/process-event` · `/process-event-from-drive` · `/search-face` · `/app/*` · `/images/*`
+    subgraph AI["AI Microservice — FastAPI (localhost:8000)"]
+        direction TB
 
----
+        API["🔌 FastAPI REST Layer
+POST /process-event
+POST /process-event-from-drive
+POST /search-face
+POST /app/cloudinary/signature
+GET /health · GET /images/*"]
 
-### 🤖 Layer 2 — AI Microservice (FastAPI · localhost:8000)
+        subgraph SVCS["Internal Services"]
+            direction LR
+            EMB["🔵 EmbeddingService
+──────────────
+RetinaFace
+Detects all faces
+──────────────
+Facenet512
+Face → 512-D vector
+L2-normalised"]
+            CLU["🟣 ClusteringService
+──────────────
+DBSCAN Algorithm
+Cosine distance
+eps = 0.22
+──────────────
+1 cluster = 1 person
+No K required"]
+            SEA["🟢 SearchService
+──────────────
+Stage 1 — FAISS
+Centroid search
+Top 5 clusters
+──────────────
+Stage 2 — Exact
+Member refinement
+Threshold ≥ 0.80"]
+            DRV["🟠 DriveService
+──────────────
+gdown library
+Downloads ALL images
+from public folder
+──────────────
+No API key needed
+Free to use"]
+        end
 
-**FastAPI REST Layer**
+        FAISS["⚡ FAISS Engine
+FlatIP index — under 100 clusters
+IVFFlat index — 100 or more clusters
+CPU on Windows · GPU on Linux"]
 
-| Endpoint | Method | Purpose |
-|---|:---:|---|
-| `/process-event` | POST | Upload images → detect → embed → cluster → index |
-| `/process-event-from-drive` | POST | Import entire Google Drive folder automatically |
-| `/search-face` | POST | Upload selfie → find matching cluster → return photos |
-| `/app/cloudinary/signature` | POST | Generate signed upload URL (secret stays server-side) |
-| `/event/{event_id}` | GET | Retrieve full cluster manifest |
-| `/health` | GET | Service health + FAISS device status |
-| `/images/*` | GET | Serve stored event images as static files |
+        STORE[("💾 Disk Storage
+event_data/event_id/
+──────────────
+embeddings.npy — face vectors N×512
+clusters.json — cluster manifest
+faiss.index — search index
+meta.json — per-face metadata")]
+    end
 
----
+    subgraph EXT["External Services"]
+        direction LR
+        DRIVE["☁️ Google Drive
+Admin shares folder publicly
+gdown downloads everything
+No API key · Completely free"]
+        CLOUD["🔴 Cloudinary
+Images stored in cloud
+Frontend displays via URL
+API secret stays server-side"]
+    end
 
-**Internal Services**
+    User --> FE
+    FE --> PROXY
+    PROXY --> API
+    API --> EMB
+    API --> CLU
+    API --> SEA
+    API --> DRV
+    EMB --> FAISS
+    CLU --> FAISS
+    SEA --> FAISS
+    FAISS --> STORE
+    EMB --> STORE
+    DRV --> DRIVE
+    API --> CLOUD
 
-| 🔵 EmbeddingService | 🟣 ClusteringService | 🟢 SearchService | 🟠 DriveService |
-|:---:|:---:|:---:|:---:|
-| **RetinaFace** | **DBSCAN** | **Stage 1 — FAISS** | **gdown library** |
-| Detects all faces | Distance: cosine | Centroid search | Downloads ALL images |
-| in every image | eps = 0.22 | → Top 5 clusters | from public folder |
-| **Facenet512** | 1 cluster = 1 person | **Stage 2 — Exact** | No API key needed |
-| Face → 512-D vector | No K required | vs all member embeddings | Auto-processes |
-| L2-normalised | Noise → singletons | Threshold ≥ 0.80 | after download |
-| Duplicate: sim>0.98 skip | No image ever lost | Returns image paths | Free to use |
+    style FE fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,color:#000
+    style PROXY fill:#f0f9ff,stroke:#0284c7,stroke-width:1px,color:#000
+    style AI fill:#f5f3ff,stroke:#0f1f41,stroke-width:2px,color:#000
+    style SVCS fill:#fafafa,stroke:#d1d5db,stroke-width:1px,color:#000
+    style EXT fill:#f9fafb,stroke:#6b7280,stroke-width:1px,color:#000
 
----
-
-**FAISS Engine** (`utils/faiss_engine.py`)
-
-| Index Type | When Used | Speed |
-|---|---|---|
-| `IndexFlatIP` | < 100 clusters | Exact · always correct |
-| `IndexIVFFlat` | ≥ 100 clusters | Approximate · ~99% recall · much faster |
-| CPU mode | Windows (faiss-cpu) | Fast for all normal events |
-| GPU mode | Linux with CUDA | 5–50x faster for large events |
-
----
-
-**Disk Storage** (`event_data/<event_id>/`)
-
-| File | Contents |
-|---|---|
-| `embeddings.npy` | All face vectors · shape (N, 512) · float32 |
-| `clusters.json` | Cluster manifest · centroids + image paths per person |
-| `faiss.index` | Pre-built FAISS similarity search index |
-| `meta.json` | Per-face metadata · image path + cluster ID |
-
----
-
-### ☁️ Layer 3 — External Services
-
-| 🟢 Google Drive | 🔴 Cloudinary |
-|:---:|:---:|
-| Admin shares folder link publicly | Event images hosted in the cloud |
-| `gdown` auto-downloads all images | Frontend displays via Cloudinary URL |
-| No API key required — completely free | Signature generated server-side |
-| Share → Anyone with link → Viewer | API secret never exposed to browser |
-
----
-
-### 🔄 End-to-End Flow
-
+    style EMB fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#000
+    style CLU fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#000
+    style SEA fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#000
+    style DRV fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#000
+    style API fill:#e0e7ff,stroke:#4338ca,stroke-width:2px,color:#000
+    style FAISS fill:#f5f3ff,stroke:#7c3aed,stroke-width:2px,color:#000
+    style STORE fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#000
+    style DRIVE fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#000
+    style CLOUD fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#000
+    style User fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#000
+    style P fill:#e0f2fe,stroke:#0284c7,stroke-width:1px,color:#000
 ```
-① Admin pastes Drive link  →  POST /process-event-from-drive
-        ↓
-② gdown downloads ALL images from Google Drive folder
-        ↓
-③ RetinaFace detects every face in every image
-        ↓
-④ Facenet512 converts each face → 512-dimensional vector (L2-normalised)
-        ↓
-⑤ DBSCAN clusters all vectors by person  (eps=0.22, cosine distance)
-        ↓
-⑥ FAISS index built and saved to disk  →  Event ready for search ✅
-        ↓
-⑦ User uploads selfie  →  POST /search-face
-        ↓
-⑧ Stage 1: FAISS searches cluster centroids  →  Top 5 candidates
-        ↓
-⑨ Stage 2: Exact dot-product vs every member embedding in Top 5
-        ↓
-⑩ Best match similarity ≥ 0.80  →  All photos of that person returned ✅
-```
 
----
+### End-to-End Flow
+
+```mermaid
+flowchart LR
+    A(["① Upload
+Photos or
+Drive link"]) -->
+    B(["② RetinaFace
+Detects
+every face"]) -->
+    C(["③ Facenet512
+Face →
+512-D vector"]) -->
+    D(["④ DBSCAN
+Clusters
+by person"]) -->
+    E(["⑤ User
+uploads
+selfie"]) -->
+    F(["⑥ FAISS
+finds cluster
+match"]) -->
+    G(["⑦ All photos
+returned
+instantly ✅"])
+
+    style A fill:#dbeafe,stroke:#1d4ed8,color:#000
+    style B fill:#dbeafe,stroke:#1d4ed8,color:#000
+    style C fill:#ede9fe,stroke:#7c3aed,color:#000
+    style D fill:#ede9fe,stroke:#7c3aed,color:#000
+    style E fill:#d1fae5,stroke:#059669,color:#000
+    style F fill:#d1fae5,stroke:#059669,color:#000
+    style G fill:#d1fae5,stroke:#059669,color:#000
+```
 
 ## 🛠️ Tech Stack
 
