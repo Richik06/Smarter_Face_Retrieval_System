@@ -1,3 +1,4 @@
+<img width="2894" height="3680" alt="smartface_architecture" src="https://github.com/user-attachments/assets/3afaf134-cbbc-4106-94ad-26e10a90e864" />
 # 🎯 SmartFace — AI-Powered Face Retrieval System
 
 > **Find every photo of a person from any event — just upload their face.**
