@@ -46,7 +46,7 @@ User uploads one selfie → AI finds their cluster → returns all their photos
 
 ## 🏗️ Full System Architecture
 
-![SmartFace Architecture](docs/architecture.png)
+![SmartFace Architecture](docs/smartface_architecture.png)
 
 ### Layer breakdown
 
