@@ -45,73 +45,56 @@ User uploads one selfie → AI finds their cluster → returns all their photos
 
 ## 🏗️ Full System Architecture
 
+![SmartFace Architecture](docs/architecture.png)
+
+### Layer breakdown
+
+**Frontend (React + Vite — port 5173)**
+All API calls are made via relative URLs and forwarded to the AI service through the Vite proxy configured in `vite.config.js`. Every route used by the frontend must be listed in the proxy config.
+
+**AI Microservice (FastAPI — port 8000)**
+Handles all AI logic — face detection, embedding, clustering, and search. Also generates Cloudinary upload signatures server-side so the API secret is never exposed to the browser.
+
+**External Services**
+Google Drive is used for bulk admin photo import via `gdown` — no API key needed for public folders. Cloudinary stores event images in the cloud and serves them to the frontend via URLs.
+
+### Admin flow
+
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           SMARTFACE SYSTEM                                       │
-│                                                                                   │
-│  ┌──────────────────────────────────────────────────────┐                        │
-│  │                  FRONTEND (React + Vite)              │                        │
-│  │                  localhost:5173                       │                        │
-│  │                                                       │                        │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │                        │
-│  │  │  Upload     │  │  Query      │  │  Results    │  │                        │
-│  │  │  Event      │  │  Face       │  │  Gallery    │  │                        │
-│  │  │  Photos     │  │  Search     │  │  View       │  │                        │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │                        │
-│  └─────────┼────────────────┼────────────────┼──────────┘                        │
-│            │                │                │                                    │
-│            │ Vite Proxy     │                │                                    │
-│            │ (forwards all  │                │                                    │
-│            │ /app/* and     │                │                                    │
-│            │ /process-*     │                │                                    │
-│            │ to port 8000)  │                │                                    │
-│            ▼                ▼                ▼                                    │
-│  ┌──────────────────────────────────────────────────────┐                        │
-│  │            AI MICROSERVICE (FastAPI + Python)         │                        │
-│  │            localhost:8000                             │                        │
-│  │                                                       │                        │
-│  │  ┌──────────────────────────────────────────────┐    │                        │
-│  │  │              FastAPI Routes                   │    │                        │
-│  │  │  POST /process-event                         │    │                        │
-│  │  │  POST /process-event-from-drive              │    │                        │
-│  │  │  POST /search-face                           │    │                        │
-│  │  │  POST /app/cloudinary/signature              │    │                        │
-│  │  │  GET  /health  GET /images/*                 │    │                        │
-│  │  └──────────────────┬───────────────────────────┘    │                        │
-│  │                     │                                 │                        │
-│  │    ┌────────────────┼──────────────────┐             │                        │
-│  │    ▼                ▼                  ▼             │                        │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │                        │
-│  │  │Embedding │  │Clustering│  │  SearchService   │   │                        │
-│  │  │Service   │  │Service   │  │                  │   │                        │
-│  │  │          │  │          │  │  Stage 1: FAISS  │   │                        │
-│  │  │RetinaFace│  │ DBSCAN   │  │  centroid search │   │                        │
-│  │  │Facenet512│  │ eps=0.22 │  │                  │   │                        │
-│  │  │512-D vec │  │ cosine   │  │  Stage 2: Exact  │   │                        │
-│  │  └────┬─────┘  └────┬─────┘  │  member match   │   │                        │
-│  │       │              │        └──────────────────┘   │                        │
-│  │       └──────────────▼                               │                        │
-│  │              ┌───────────────┐                       │                        │
-│  │              │ Disk Storage  │                       │                        │
-│  │              │ embeddings.npy│                       │                        │
-│  │              │ clusters.json │                       │                        │
-│  │              │ faiss.index   │                       │                        │
-│  │              └───────────────┘                       │                        │
-│  └──────────────────────────────────────────────────────┘                        │
-│                        │                    │                                     │
-│                        ▼                    ▼                                     │
-│  ┌──────────────────────────┐   ┌───────────────────────┐                       │
-│  │  GOOGLE DRIVE            │   │  CLOUDINARY            │                       │
-│  │                          │   │                        │                       │
-│  │  Admin shares folder     │   │  Event images stored  │                       │
-│  │  gdown downloads all     │   │  in cloud             │                       │
-│  │  images automatically    │   │  Frontend displays    │                       │
-│  └──────────────────────────┘   │  via Cloudinary URLs  │                       │
-│                                  └───────────────────────┘                       │
-└─────────────────────────────────────────────────────────────────────────────────┘
+Admin pastes Drive link
+        ↓
+POST /process-event-from-drive
+        ↓
+gdown downloads all images
+        ↓
+RetinaFace detects every face in every image
+        ↓
+Facenet512 converts each face → 512-D vector (L2-normalised)
+        ↓
+DBSCAN clusters vectors by person (eps=0.22, cosine metric)
+        ↓
+FAISS index built and saved to disk
+        ↓
+Event ready for search ✅
 ```
 
----
+### User search flow
+
+```
+User uploads selfie
+        ↓
+POST /search-face + event_id
+        ↓
+RetinaFace + Facenet512 → query 512-D vector
+        ↓
+Stage 1: FAISS searches cluster centroids → Top 5 candidates
+        ↓
+Stage 2: Exact dot-product vs every member embedding in top 5
+        ↓
+Best match similarity ≥ 0.80 → Match found
+        ↓
+All image paths from matched cluster returned ✅
+```
 
 ## 🛠️ Tech Stack
 
@@ -315,6 +298,32 @@ npm install
 cd ..
 ```
 
+### Step 6 — Verify vite.config.js has all routes proxied
+
+Open `frontend/vite.config.js` — it must look like this:
+
+```javascript
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      "/app": "http://127.0.0.1:8000",
+      "/health": "http://127.0.0.1:8000",
+      "/process-event": "http://127.0.0.1:8000",
+      "/process-event-from-drive": "http://127.0.0.1:8000",
+      "/search-face": "http://127.0.0.1:8000",
+      "/get-embedding": "http://127.0.0.1:8000",
+      "/recluster-event": "http://127.0.0.1:8000",
+      "/event": "http://127.0.0.1:8000",
+      "/images": "http://127.0.0.1:8000",
+    }
+  }
+});
+```
 
 ---
 
