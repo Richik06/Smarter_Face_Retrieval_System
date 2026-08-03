@@ -21,11 +21,6 @@ Option A — gdown (simplest, no API key needed):
     pip install gdown
 
 Option B — Google Drive API key (more reliable for large folders):
-    1. Go to https://console.cloud.google.com
-    2. Create a project → Enable "Google Drive API"
-    3. Create an API key (Credentials → API key)
-    4. Set GOOGLE_DRIVE_API_KEY=<your_key> in .env
-
 The service tries gdown first, then falls back to the Drive API if a key is set.
 """
 

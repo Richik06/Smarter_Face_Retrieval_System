@@ -39,7 +39,7 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# ── Thread-safe GPU resource singleton ───────────────────────────────────────
+# ── Thread-safe GPU resource singleton 
 _gpu_res = None
 _gpu_lock = threading.Lock()
 
@@ -67,7 +67,7 @@ def _get_gpu_resource():
     return _gpu_res
 
 
-# ── Device detection ──────────────────────────────────────────────────────────
+# ── Device detection 
 
 def _detect_device() -> str:
     """
@@ -154,8 +154,7 @@ def faiss_available() -> bool:
         return False
 
 
-# ── Index construction ────────────────────────────────────────────────────────
-
+# ── Index construction 
 def build_index(vectors: np.ndarray):
     """
     Build the most appropriate FAISS index for *vectors*.
@@ -249,7 +248,7 @@ def _move_to_gpu(cpu_index):
         return None
 
 
-# ── Index persistence ─────────────────────────────────────────────────────────
+# ── Index persistence 
 
 def save_index(index, path) -> bool:
     """
@@ -308,7 +307,7 @@ def load_index(path):
         return None
 
 
-# ── Search ────────────────────────────────────────────────────────────────────
+# ── Search 
 
 def search_index(index, query: np.ndarray, k: int) -> Tuple[list, list]:
     """
@@ -344,7 +343,7 @@ def search_index(index, query: np.ndarray, k: int) -> Tuple[list, list]:
         return [], []
 
 
-# ── Diagnostics ───────────────────────────────────────────────────────────────
+# ── Diagnostics 
 
 def get_faiss_info() -> dict:
     """

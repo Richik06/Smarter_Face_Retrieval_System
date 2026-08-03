@@ -69,7 +69,7 @@ class EventService:
         ensure_event_dirs(event_id)
         img_dir = images_dir(event_id)
 
-        # ── Check for existing data (incremental add) ────────────────────────
+        # ── Check for existing data (incremental add)
         existing_embeddings = load_embeddings(event_id)
         existing_meta = load_meta(event_id)
 
@@ -81,7 +81,7 @@ class EventService:
         new_faces_total = 0
         images_with_no_face: List[str] = []
 
-        # ── Process each uploaded image ──────────────────────────────────────
+        # ── Process each uploaded image 
         for upload in images:
             original_filename = upload.filename or "unknown.jpg"
             logger.info("Processing image: %s", original_filename)
@@ -136,13 +136,13 @@ class EventService:
                 "images_with_no_face": images_with_no_face,
             }
 
-        # ── Persist embeddings & meta ────────────────────────────────────────
+        # ── Persist embeddings & meta 
         emb_array = np.array(all_embeddings, dtype=np.float32)   # (N, dim)
         save_embeddings(event_id, emb_array)
         # Temporarily save meta without cluster_ids
         save_meta(event_id, all_meta)
 
-        # ── Cluster ──────────────────────────────────────────────────────────
+        # ── Cluster 
         labels = ClusteringService.cluster_embeddings(
             emb_array, eps=recluster_eps
         )
@@ -152,20 +152,20 @@ class EventService:
             all_meta[i]["cluster_id"] = int(label)
         save_meta(event_id, all_meta)
 
-        # ── Build manifest ───────────────────────────────────────────────────
+        # ── Build manifest
         manifest = ClusteringService.build_cluster_manifest(
             event_id, emb_array, labels, all_meta
         )
         save_clusters(event_id, manifest)
 
-        # ── Pre-build FAISS index ─────────────────────────────────────────────
+        # ── Pre-build FAISS index 
         centroids = np.array(
             [c["centroid"] for c in manifest["clusters"].values()],
             dtype=np.float32,
         )
         SearchService.build_and_save_faiss_index(event_id, centroids)
 
-        # ── Build response ────────────────────────────────────────────────────
+        # ── Build response 
         clusters_summary = [
             {
                 "cluster_id": c["cluster_id"],
@@ -191,7 +191,7 @@ class EventService:
         )
         return response
 
-    # ── Google Drive pipeline ─────────────────────────────────────────────────
+    # ── Google Drive pipeline 
 
     @classmethod
     def process_event_from_drive(
@@ -224,7 +224,7 @@ class EventService:
             "Starting Drive import for event '%s' from: %s", event_id, drive_link
         )
 
-        # ── Download from Drive ───────────────────────────────────────────────
+        # ── Download from Drive 
         tmp_dir = settings.DRIVE_TEMP_DIR / event_id
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -250,7 +250,7 @@ class EventService:
             len(downloaded_paths), event_id,
         )
 
-        # ── Process downloaded images ─────────────────────────────────────────
+        # ── Process downloaded images 
         ensure_event_dirs(event_id)
         img_dir = images_dir(event_id)
 
@@ -305,7 +305,7 @@ class EventService:
                 })
                 new_faces_total += 1
 
-        # ── Clean up temp downloads ───────────────────────────────────────────
+        # ── Clean up temp downloads 
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
@@ -321,7 +321,7 @@ class EventService:
                 "errors": errors,
             }
 
-        # ── Cluster → manifest → FAISS ────────────────────────────────────────
+        # ── Cluster → manifest → FAISS 
         emb_array = np.array(all_embeddings, dtype=np.float32)
         save_embeddings(event_id, emb_array)
         save_meta(event_id, all_meta)
@@ -370,7 +370,7 @@ class EventService:
         )
         return response
 
-    # ── Re-clustering ─────────────────────────────────────────────────────────
+    # ── Re-clustering 
 
     @classmethod
     def recluster_event(
@@ -417,7 +417,7 @@ class EventService:
             "message": "Re-clustering completed.",
         }
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ── Helpers
 
     @staticmethod
     def _is_duplicate(

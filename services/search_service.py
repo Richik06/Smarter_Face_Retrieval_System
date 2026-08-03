@@ -51,7 +51,7 @@ _TOP_K = 5
 
 class SearchService:
 
-    # ── Public search ─────────────────────────────────────────────────────────
+    # ── Public search 
 
     @classmethod
     def search(
@@ -86,7 +86,7 @@ class SearchService:
             dtype=np.float32,
         )
 
-        # ── Stage 1: fast centroid search ────────────────────────────────────
+        # ── Stage 1: fast centroid search 
         k = min(_TOP_K, len(cluster_ids))
         top_indices, top_scores, search_device = cls._stage1_search(
             query_embedding, centroids, event_id, k=k
@@ -102,7 +102,7 @@ class SearchService:
                 f"{top_scores[0]:.4f} well below threshold)."
             )
 
-        # ── Stage 2: exact member-level refinement ────────────────────────────
+        # ── Stage 2: exact member-level refinement
         best_cluster_id, best_score = cls._stage2_refine(
             query_embedding, top_indices, cluster_ids, cluster_map, event_id
         )
@@ -126,7 +126,7 @@ class SearchService:
             "message": "Match found.",
         }
 
-    # ── Stage 1 ───────────────────────────────────────────────────────────────
+    # ── Stage 1 
 
     @classmethod
     def _stage1_search(
@@ -184,8 +184,7 @@ class SearchService:
         top_idx = np.argsort(scores)[::-1][:k]
         return list(top_idx.tolist()), list(scores[top_idx].tolist())
 
-    # ── Stage 2 ───────────────────────────────────────────────────────────────
-
+    # ── Stage 2
     @classmethod
     def _stage2_refine(
         cls,
@@ -234,7 +233,7 @@ class SearchService:
 
         return best_cid, best_score
 
-    # ── Index management ──────────────────────────────────────────────────────
+    # ── Index management 
 
     @classmethod
     def build_and_save_faiss_index(
@@ -264,15 +263,14 @@ class SearchService:
                     event_id, len(centroids),
                 )
 
-    # ── Diagnostics ──────────────────────────────────────────────────────────
+    # ── Diagnostics 
 
     @classmethod
     def faiss_info(cls) -> dict:
         """Return FAISS device/version info for health/debug endpoints."""
         return get_faiss_info()
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
+    # ── Helpers 
     @staticmethod
     def _no_match(message: str) -> Dict[str, Any]:
         return {

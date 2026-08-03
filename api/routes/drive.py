@@ -1,6 +1,5 @@
 """
 Google Drive router
-────────────────────
 POST /process-event-from-drive  – download images from a Google Drive folder
                                    link, then run the full face pipeline
 """
